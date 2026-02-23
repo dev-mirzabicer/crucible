@@ -1,0 +1,1 @@
+export { createSpecialCompactTool } from "./tools"

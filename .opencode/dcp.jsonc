@@ -1,0 +1,111 @@
+{
+  "$schema": "https://raw.githubusercontent.com/Opencode-DCP/opencode-dynamic-context-pruning/master/dcp.schema.json",
+
+  // Master switch
+  "enabled": true,
+  "debug": false,
+
+  // Notifications: "detailed" shows what was pruned, "chat" puts it inline
+  "pruneNotification": "detailed",
+  "pruneNotificationType": "chat",
+
+  // Slash commands (/dcp context, /dcp stats, /dcp sweep, etc.)
+  "commands": {
+    "enabled": true,
+    // Protect our custom Crucible tools from /dcp sweep
+    "protectedTools": ["special_compact", "session_list", "session_read", "session_search", "session_info"]
+  },
+
+  // Manual mode OFF — let DCP work autonomously alongside our agents
+  "manualMode": {
+    "enabled": false,
+    // Automatic strategies (dedup, supersede-writes, purge-errors) always run
+    "automaticStrategies": true
+  },
+
+  // Protect recent tool outputs from being pruned too eagerly
+  "turnProtection": {
+    "enabled": true,
+    "turns": 3
+  },
+
+  // Never prune file operations on plan/progress docs
+  "protectedFilePatterns": [
+    "**/docs/plan/**",
+    "**/docs/phases/**/PROGRESS.md",
+    "**/docs/phases/**/plan/**",
+    "**/docs/phases/**/research/**",
+    "**/docs/phases/**/reviews/**"
+  ],
+
+  // LLM-driven pruning tools
+  "tools": {
+    "settings": {
+      // Nudge the agent to use DCP tools every 12 tool results
+      // Slightly relaxed for 1M context — no need to be hyper-aggressive
+      "nudgeEnabled": true,
+      "nudgeFrequency": 12,
+
+      // Context limit: threshold where DCP nudges the agent to start pruning.
+      // For Claude Max5 (1M context), set at 35% (~350k tokens).
+      // This keeps the model in the "smart zone" without being too aggressive.
+      "contextLimit": "35%",
+
+      // Per-model overrides: GPT 5.3 Codex has 256k context — set lower
+      "modelLimits": {
+        "openai/gpt-5-3-codex": "40%"
+      },
+
+      // Protect Crucible-specific tools from being pruned
+      "protectedTools": [
+        "special_compact",
+        "session_list",
+        "session_read",
+        "session_search",
+        "session_info"
+      ]
+    },
+
+    // Distill: agent can summarize valuable context before removing raw content.
+    // "allow" = no user prompt needed — the agent decides when to distill.
+    "distill": {
+      "permission": "allow",
+      "showDistillation": false
+    },
+
+    // Compress: collapses a range of conversation into a single summary.
+    // "deny" by default — we prefer our own /special-compact for explicit compaction.
+    // The agent can still use distill and prune for fine-grained management.
+    "compress": {
+      "permission": "deny",
+      "showCompression": false
+    },
+
+    // Prune: removes completed/noisy tool content entirely.
+    // "allow" = agent autonomously prunes when context gets heavy.
+    "prune": {
+      "permission": "allow"
+    }
+  },
+
+  // Automatic strategies (zero LLM cost — run on every request)
+  "strategies": {
+    // Remove duplicate tool calls (same tool, same args) — keep only latest
+    "deduplication": {
+      "enabled": true,
+      "protectedTools": []
+    },
+
+    // Remove write outputs when file was subsequently read (read captures current state)
+    "supersedeWrites": {
+      "enabled": true
+    },
+
+    // Prune errored tool inputs after N turns (error message preserved, input removed)
+    "purgeErrors": {
+      "enabled": true,
+      "turns": 4,
+      "protectedTools": []
+    }
+  }
+}

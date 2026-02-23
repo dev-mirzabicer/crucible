@@ -1,0 +1,36 @@
+import type { LoadedSkill, LazyContentLoader } from "../../features/opencode-skill-loader"
+import type { SkillMcpManager } from "../../features/skill-mcp-manager"
+import type { GitMasterConfig } from "../../config/schema/git-master"
+
+export type CommandScope = "builtin" | "config" | "user" | "project" | "opencode" | "opencode-project"
+
+export interface CommandMetadata {
+  name: string
+  description: string
+  argumentHint?: string
+  model?: string
+  agent?: string
+  subtask?: boolean
+}
+
+export interface CommandInfo {
+  name: string
+  path?: string
+  metadata: CommandMetadata
+  content?: string
+  scope: CommandScope
+  lazyContentLoader?: LazyContentLoader
+}
+
+export interface SlashcommandToolOptions {
+  /** Pre-loaded commands (skip discovery if provided) */
+  commands?: CommandInfo[]
+  /** Pre-loaded skills (skip discovery if provided) */
+  skills?: LoadedSkill[]
+  /** MCP manager for skill MCP capabilities */
+  mcpManager?: SkillMcpManager
+  /** Function to get current session ID */
+  getSessionID?: () => string
+  /** Git master configuration */
+  gitMasterConfig?: GitMasterConfig
+}

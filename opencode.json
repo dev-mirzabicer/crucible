@@ -1,0 +1,46 @@
+{
+  "plugin": [
+    "@tarquinen/opencode-dcp@latest",
+    "opencode-supermemory@latest"
+  ],
+  "$schema": "https://opencode.ai/config.json",
+  "agent": {
+    "build": {
+      "disable": true
+    },
+    "plan": {
+      "disable": true
+    }
+  },
+  "compaction": {
+    "auto": false
+  },
+  "formatter": {},
+  "mcp": {
+    "context7": {
+      "type": "remote",
+      "url": "https://mcp.context7.com/mcp",
+      "enabled": true,
+      "oauth": false
+    },
+    "auggie": {
+      "type": "remote",
+      "url": "https://api.augmentcode.com/mcp",
+      "enabled": true
+    },
+    "tavily": {
+      "type": "local",
+      "command": ["npx", "-y", "tavily-mcp"],
+      "environment": {
+        "TAVILY_API_KEY": "{env:TAVILY_API_KEY}"
+      },
+      "enabled": true
+    },
+    "grep_app": {
+      "type": "remote",
+      "url": "https://mcp.grep.app",
+      "enabled": true,
+      "oauth": false
+    }
+  }
+}
