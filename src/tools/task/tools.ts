@@ -5,15 +5,23 @@ import { log } from "../../shared"
 import { buildDelegationPrompt } from "./context-builder"
 import type { TaskArgs } from "./types"
 
-const ALLOWED_SUBAGENTS = new Set(["researcher", "scout", "librarian", "oracle", "artistry"])
+const ALLOWED_SUBAGENTS = new Set(["researcher", "scout", "librarian", "oracle"])
 
-function normalizeAgent(args: TaskArgs): string {
-  const raw = (args.agent ?? args.subagent_type ?? "").trim().toLowerCase()
+function validateAgent(args: TaskArgs): string {
+  const raw = (args.subagent_type ?? "").trim().toLowerCase()
   if (!raw) {
-    throw new Error("Missing agent. Provide agent or subagent_type")
+    throw new Error(
+      `Missing required parameter: subagent_type. ` +
+      `Must be one of: ${[...ALLOWED_SUBAGENTS].join(", ")}. ` +
+      `Use 'researcher' for deep research, 'scout' for fast codebase grep, ` +
+      `'librarian' for external docs/OSS search, 'oracle' for architecture/debugging consultation.`,
+    )
   }
   if (!ALLOWED_SUBAGENTS.has(raw)) {
-    throw new Error(`Unsupported agent: ${raw}. Allowed: ${[...ALLOWED_SUBAGENTS].join(", ")}`)
+    throw new Error(
+      `Invalid subagent_type: "${raw}". ` +
+      `Must be one of: ${[...ALLOWED_SUBAGENTS].join(", ")}`,
+    )
   }
   return raw
 }
@@ -65,8 +73,11 @@ export function createTaskTool(ctx: PluginInput, manager: BackgroundManager): To
     args: {
       description: tool.schema.string().describe("Short task description"),
       prompt: tool.schema.string().describe("Detailed task prompt"),
-      agent: tool.schema.string().optional().describe("Target sub-agent (researcher|scout|librarian|oracle|artistry)"),
-      subagent_type: tool.schema.string().optional().describe("Alias of agent"),
+      subagent_type: tool.schema.string().describe(
+        "REQUIRED. Target sub-agent type. One of: researcher, scout, librarian, oracle. " +
+        "researcher=deep research (web, Context7, GitHub). scout=fast codebase grep. " +
+        "librarian=external docs/OSS search. oracle=architecture/debugging consultant (read-only, expensive)."
+      ),
       fresh_context: tool.schema.boolean().optional().describe("If true, do not inject parent plan/persist/tool context"),
       context: tool.schema
         .object({
@@ -77,7 +88,7 @@ export function createTaskTool(ctx: PluginInput, manager: BackgroundManager): To
           files: tool.schema.array(tool.schema.string()).optional(),
         })
         .optional(),
-      run_in_background: tool.schema.boolean().optional().describe("Default false (blocking)"),
+      run_in_background: tool.schema.boolean().optional().describe("Default false (blocking). Set true for parallel/background execution."),
       session_id: tool.schema.string().optional().describe("Continue an existing sub-agent session"),
       model: tool.schema
         .object({
@@ -93,7 +104,7 @@ export function createTaskTool(ctx: PluginInput, manager: BackgroundManager): To
         throw new Error("Task tool requires a parent session context")
       }
 
-      const agent = normalizeAgent(args)
+      const agent = validateAgent(args)
       const runInBackground = args.run_in_background === true
       const freshContext = args.fresh_context === true
       const prompt = await buildDelegationPrompt({

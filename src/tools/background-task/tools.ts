@@ -9,15 +9,16 @@ export function createBackgroundOutputTool(manager: BackgroundManager): ToolDefi
     args: {
       task_id: tool.schema.string().describe("Background task ID"),
       block: tool.schema.boolean().optional().describe("Wait for completion before returning"),
-      timeout: tool.schema.number().optional().describe("Timeout in milliseconds when block=true"),
+      timeout: tool.schema.number().optional().describe("Timeout in seconds when block=true. Default: 30 minutes. Example: 600 = 10 minutes."),
       full_session: tool.schema.boolean().optional().describe("Return formatted full session transcript"),
       include_thinking: tool.schema.boolean().optional().describe("Include thinking/reasoning parts in full session mode"),
       include_tool_results: tool.schema.boolean().optional().describe("Include tool_result parts in full session mode"),
       message_limit: tool.schema.number().optional().describe("Limit number of session messages returned in full session mode"),
     },
     async execute(args: BackgroundOutputArgs) {
+      const timeoutMs = args.timeout && args.timeout > 0 ? args.timeout * 1000 : undefined
       const task = args.block
-        ? await manager.waitFor(args.task_id, { timeoutMs: args.timeout })
+        ? await manager.waitFor(args.task_id, { timeoutMs })
         : manager.getTask(args.task_id)
 
       if (!task) {
@@ -53,6 +54,43 @@ export function createBackgroundOutputTool(manager: BackgroundManager): ToolDefi
       ]
         .filter(Boolean)
         .join("\n")
+    },
+  })
+}
+
+export function createBackgroundWaitAllTool(manager: BackgroundManager): ToolDefinition {
+  return tool({
+    description: "Wait for multiple background tasks to complete. Returns all results at once. Use after dispatching parallel agents.",
+    args: {
+      task_ids: tool.schema.array(tool.schema.string()).describe("List of background task IDs to wait for"),
+      timeout: tool.schema.number().optional().describe("Timeout in seconds. Default: 30 minutes. Returns partial results on timeout."),
+    },
+    async execute(args: { task_ids: string[]; timeout?: number }) {
+      if (!args.task_ids || args.task_ids.length === 0) {
+        throw new Error("Provide at least one task_id in task_ids array")
+      }
+
+      const timeoutMs = args.timeout && args.timeout > 0 ? args.timeout * 1000 : undefined
+      const tasks = await manager.waitAll(args.task_ids, { timeoutMs })
+
+      const lines: string[] = [`Waited for ${tasks.length} task(s):`, ""]
+      for (const task of tasks) {
+        lines.push(`## Task: ${task.id} — ${task.status.toUpperCase()}`)
+        lines.push(`Agent: ${task.agent}`)
+        lines.push(`Description: ${task.description}`)
+        lines.push(`Session: ${task.sessionID ?? "(none)"}`)
+        lines.push(`Output file: ${task.outputFile ?? "(none)"}`)
+        if (task.error) lines.push(`Error: ${task.error}`)
+        if (task.result) {
+          lines.push("")
+          lines.push(task.result)
+        }
+        lines.push("")
+        lines.push("---")
+        lines.push("")
+      }
+
+      return lines.join("\n")
     },
   })
 }

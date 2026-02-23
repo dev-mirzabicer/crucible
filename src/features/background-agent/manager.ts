@@ -313,42 +313,135 @@ export class BackgroundManager {
     if (this.polling) return
     this.polling = true
     try {
-      const statuses = await this.client.session.status().catch(() => null)
+      const currentTime = Date.now()
+      const statuses = await this.client.session.status().catch((err) => {
+        log("[poll] session.status() FAILED", { error: err instanceof Error ? err.message : String(err) })
+        return null
+      })
       const statusMap = statuses?.data
       const running = [...this.tasks.values()].filter((task) => task.status === "running")
 
-      for (const task of running) {
-        const stale = Date.now() - task.lastActivityAt.getTime() > this.config.staleTimeoutMs
-        if (stale) {
-          this.failTask(task, "Task timed out due to inactivity")
-          continue
-        }
+      if (running.length > 0) {
+        log("[poll] polling cycle", {
+          runningCount: running.length,
+          statusMapKeys: statusMap ? Object.keys(statusMap) : "null",
+          statusMapRaw: statusMap ? JSON.stringify(statusMap).slice(0, 500) : "null",
+        })
+      }
 
+      for (const task of running) {
         if (!task.sessionID) {
           this.failTask(task, "Missing child session ID")
           continue
         }
 
-        const status = parseSessionStatus(statusMap, task.sessionID)
-        if (!status) {
+        const runtimeMs = task.startedAt ? currentTime - task.startedAt.getTime() : 0
+
+        // ── ABSOLUTE TTL ── always kills regardless of activity
+        if (runtimeMs > this.config.taskTtlMs) {
+          log("[poll] ABSOLUTE TTL exceeded", { taskID: task.id, sessionID: task.sessionID, runtimeMs })
+          this.failTask(task, `Task exceeded absolute time limit (${Math.round(runtimeMs / 60000)}min)`)
           continue
         }
-        if (status && status !== "idle") {
+
+        // ── SESSION STATUS CHECK (FIRST — before any stale logic) ──
+        const status = parseSessionStatus(statusMap, task.sessionID)
+        const sessionIsRunning = status !== undefined && status !== "idle"
+
+        log("[poll] task status", {
+          taskID: task.id,
+          sessionID: task.sessionID,
+          status: status ?? "NOT_IN_MAP",
+          sessionIsRunning,
+          runtimeMs,
+          hadProgress: task.hadProgress,
+          unknownStatusPolls: task.unknownStatusPolls,
+          stablePolls: task.stablePolls,
+        })
+
+        // ── RUNNING SESSION → immune from stale, update activity ──
+        if (sessionIsRunning) {
           task.lastActivityAt = now()
           task.idleSeen = false
           task.stablePolls = 0
+          task.unknownStatusPolls = 0
+          task.hadProgress = true
           continue
         }
 
-        if (status === "idle") {
-          const runtimeMs = task.startedAt ? Date.now() - task.startedAt.getTime() : 0
-          if (runtimeMs < this.config.minimumRuntimeMs) {
-            continue
+        // ── UNKNOWN STATUS (session not in status map) ──
+        if (status === undefined) {
+          task.unknownStatusPolls = (task.unknownStatusPolls ?? 0) + 1
+
+          // If we've never seen this session in the status map AND it's been
+          // a long time, check if it actually finished by reading messages
+          if (task.unknownStatusPolls > this.config.maxUnknownStatusPolls) {
+            log("[poll] unknown status exceeded threshold, checking messages", {
+              taskID: task.id,
+              unknownStatusPolls: task.unknownStatusPolls,
+            })
+
+            // Try to detect completion by checking messages directly
+            const messagesResult = await this.client.session.messages({ path: { id: task.sessionID } }).catch(() => null)
+            const messages = messagesResult?.data ?? []
+            const count = countMessages(messages)
+
+            if (count > 0 && (task.lastMessageCount ?? -1) === count) {
+              // Message count stable + unknown status = likely completed
+              task.stablePolls = (task.stablePolls ?? 0) + 1
+              if ((task.stablePolls ?? 0) >= this.config.stablePollThreshold) {
+                const result = extractLatestAssistantText(messages)
+                log("[poll] COMPLETING task (detected via message stability + unknown status)", {
+                  taskID: task.id,
+                  resultLength: result.length,
+                })
+                this.completeTask(task, result)
+                continue
+              }
+            } else {
+              task.stablePolls = 0
+              task.lastMessageCount = count
+              task.unknownStatusPolls = 0 // reset — messages changed, session is active
+              task.lastActivityAt = now()
+            }
           }
-          if (Date.now() - task.lastActivityAt.getTime() < this.config.quietPeriodMs) {
+          continue
+        }
+
+        // ── IDLE SESSION — completion detection ──
+        if (status === "idle") {
+          task.hadProgress = true
+          task.unknownStatusPolls = 0
+
+          // Don't complete sessions that just started
+          if (runtimeMs < this.config.minimumRuntimeMs) {
+            log("[poll] idle but below minimum runtime", { taskID: task.id, runtimeMs })
             continue
           }
 
+          // Quiet period: wait a bit after last activity before deciding
+          const timeSinceActivity = currentTime - task.lastActivityAt.getTime()
+          if (timeSinceActivity < this.config.quietPeriodMs) {
+            log("[poll] idle but within quiet period", { taskID: task.id, timeSinceActivity })
+            continue
+          }
+
+          // ── STALE CHECK (only for idle sessions, after minimum runtime) ──
+          const staleTimeout = task.hadProgress
+            ? this.config.staleTimeoutMs
+            : this.config.messageStalenessTimeoutMs
+          if (timeSinceActivity > staleTimeout && runtimeMs > this.config.minRuntimeBeforeStaleMs) {
+            log("[poll] STALE TIMEOUT (idle session)", {
+              taskID: task.id,
+              sessionID: task.sessionID,
+              timeSinceActivity,
+              staleTimeout,
+            })
+            this.failTask(task, `Task timed out due to inactivity (idle for ${Math.round(timeSinceActivity / 60000)}min)`)
+            continue
+          }
+
+          // Stability detection: message count must be stable for N polls
           const messagesResult = await this.client.session.messages({ path: { id: task.sessionID } }).catch(() => null)
           const messages = messagesResult?.data ?? []
           const count = countMessages(messages)
@@ -360,11 +453,19 @@ export class BackgroundManager {
             task.lastMessageCount = count
           }
 
+          log("[poll] idle stability check", {
+            taskID: task.id,
+            count,
+            stablePolls: task.stablePolls,
+            threshold: this.config.stablePollThreshold,
+          })
+
           if ((task.stablePolls ?? 0) < this.config.stablePollThreshold) {
             continue
           }
 
           const result = extractLatestAssistantText(messages)
+          log("[poll] COMPLETING task", { taskID: task.id, resultLength: result.length })
           this.completeTask(task, result)
         }
       }
@@ -435,6 +536,39 @@ export class BackgroundManager {
       }
 
       await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+  }
+
+  async waitAll(taskIDs: string[], options?: WaitOptions): Promise<BackgroundTask[]> {
+    const timeoutMs = options?.timeoutMs ?? this.config.defaultWaitTimeoutMs
+    const started = Date.now()
+    const results = new Map<string, BackgroundTask>()
+
+    while (true) {
+      let allDone = true
+      for (const id of taskIDs) {
+        if (results.has(id)) continue
+        const task = this.tasks.get(id)
+        if (!task) {
+          throw new Error(`Task not found: ${id}`)
+        }
+        if (TERMINAL_STATUSES.has(task.status)) {
+          results.set(id, formatTask(task))
+        } else {
+          allDone = false
+        }
+      }
+
+      if (allDone) {
+        return taskIDs.map((id) => results.get(id)!)
+      }
+
+      if (timeoutMs !== undefined && timeoutMs > 0 && Date.now() - started > timeoutMs) {
+        // Return what we have — completed tasks as results, still-running as current state
+        return taskIDs.map((id) => results.get(id) ?? formatTask(this.tasks.get(id)!))
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 500))
     }
   }
 

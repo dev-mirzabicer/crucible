@@ -12,7 +12,7 @@ export function createAgentUsageReminderHook(_ctx: PluginInput) {
     ) => {
       const toolName = input.tool.toLowerCase()
 
-      if (toolName === "task" || toolName === "agent_invoke" || toolName === "call_omo_agent") {
+      if (toolName === "task") {
         counters.set(input.sessionID, 0)
         return
       }

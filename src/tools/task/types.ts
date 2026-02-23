@@ -3,8 +3,7 @@ import type { BackgroundTaskContextOptions, BackgroundTaskModel } from "../../fe
 export interface TaskArgs {
   description: string
   prompt: string
-  agent?: string
-  subagent_type?: string
+  subagent_type: string
   fresh_context?: boolean
   context?: BackgroundTaskContextOptions
   run_in_background?: boolean

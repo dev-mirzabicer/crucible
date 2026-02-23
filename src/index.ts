@@ -45,8 +45,8 @@ import { createSkillMcpTool } from "./tools/skill-mcp"
 import { createSlashcommandTool, discoverCommandsSync } from "./tools/slashcommand"
 import type { CommandInfo } from "./tools/slashcommand"
 import { createTaskTool } from "./tools/task"
-import { createAgentInvokeTool } from "./tools/agent-invoke"
-import { createBackgroundCancelTool, createBackgroundOutputTool } from "./tools/background-task"
+// agent-invoke removed: consolidated into task tool (Bug 1 fix)
+import { createBackgroundCancelTool, createBackgroundOutputTool, createBackgroundWaitAllTool } from "./tools/background-task"
 import { createSpecialCompactTool } from "./tools/special-compact"
 
 import { discoverAllSkills, type LoadedSkill } from "./features/opencode-skill-loader"
@@ -58,7 +58,7 @@ import {
 } from "./features/context-injector"
 import { BackgroundManager } from "./features/background-agent"
 import { WorkflowStateManager } from "./features/workflow-state"
-import { defaults } from "./config/defaults"
+
 import { compileTemplates, expandTemplatesInSystem } from "./templates"
 import { createCompactionTodoPreserverHook } from "./hooks/compaction-todo-preserver"
 import { createWorkflowContextHook } from "./hooks/workflow-context"
@@ -117,9 +117,10 @@ const CruciblePlugin: Plugin = async (ctx) => {
   })
 
   const taskTool = createTaskTool(ctx, backgroundManager)
-  const agentInvokeTool = createAgentInvokeTool(ctx, backgroundManager)
+  // agent_invoke removed: consolidated into task tool (Bug 1 fix)
   const backgroundOutputTool = createBackgroundOutputTool(backgroundManager)
   const backgroundCancelTool = createBackgroundCancelTool(backgroundManager)
+  const backgroundWaitAllTool = createBackgroundWaitAllTool(backgroundManager)
   const specialCompactTool = createSpecialCompactTool(ctx)
 
   const commandMap = commands.reduce<Record<string, { template: string; description?: string; agent?: string; model?: string; subtask?: boolean }>>((acc, command) => {
@@ -183,10 +184,9 @@ const CruciblePlugin: Plugin = async (ctx) => {
       skill_mcp: skillMcpTool,
       slashcommand: slashcommandTool,
       task: taskTool,
-      agent_invoke: agentInvokeTool,
-      call_omo_agent: agentInvokeTool,
       background_output: backgroundOutputTool,
       background_cancel: backgroundCancelTool,
+      background_wait_all: backgroundWaitAllTool,
       special_compact: specialCompactTool,
     },
 

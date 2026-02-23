@@ -1,2 +1,2 @@
 export type { BackgroundCancelArgs, BackgroundOutputArgs } from "./types"
-export { createBackgroundCancelTool, createBackgroundOutputTool } from "./tools"
+export { createBackgroundCancelTool, createBackgroundOutputTool, createBackgroundWaitAllTool } from "./tools"

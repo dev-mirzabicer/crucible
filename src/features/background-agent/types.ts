@@ -34,6 +34,10 @@ export interface BackgroundTask {
   lastActivityAt: Date
   runInBackground: boolean
   slotAcquired?: boolean
+  /** Tracks consecutive polls where session.status() doesn't include this session */
+  unknownStatusPolls?: number
+  /** Whether this task has ever had a known session status (running or idle) */
+  hadProgress?: boolean
 }
 
 export interface BackgroundTaskContextOptions {
@@ -72,6 +76,10 @@ export interface BackgroundTaskConfig {
   modelConcurrency: Record<string, number>
   pollIntervalMs: number
   staleTimeoutMs: number
+  messageStalenessTimeoutMs: number
+  minRuntimeBeforeStaleMs: number
+  taskTtlMs: number
+  maxUnknownStatusPolls: number
   stablePollThreshold: number
   quietPeriodMs: number
   defaultWaitTimeoutMs: number
